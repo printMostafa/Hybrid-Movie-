@@ -1,6 +1,6 @@
-numpy
-scipy
-scikit-learn
-pandas
 streamlit
-scikit-surprise 
+pandas
+numpy
+scikit-learn
+scikit-surprise
+scipy 
