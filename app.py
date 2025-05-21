@@ -1,24 +1,44 @@
 import streamlit as st
-import pandas as pd
-import numpy as np
+import os
+import sys
 
+# Display Python version and environment info
+st.sidebar.text(f"Python Version: {sys.version}")
+st.sidebar.text(f"Working Directory: {os.getcwd()}")
+
+# Basic imports first
+try:
+    import numpy as np
+    import pandas as pd
+except ImportError as e:
+    st.error("❌ Error loading basic dependencies (numpy/pandas)")
+    st.error(f"Error details: {str(e)}")
+    st.stop()
+
+# Machine learning imports
+try:
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.metrics.pairwise import cosine_similarity
+except ImportError as e:
+    st.error("❌ Error loading scikit-learn")
+    st.error(f"Error details: {str(e)}")
+    st.stop()
+
+# Surprise library imports
+try:
+    from surprise import Dataset, Reader, SVD
+    from surprise.model_selection import train_test_split
+except ImportError as e:
+    st.error("❌ Error loading surprise library")
+    st.error(f"Error details: {str(e)}")
+    st.stop()
+
+# Page configuration
 st.set_page_config(
     page_title="Hybrid Movie Recommender",
     page_icon="🎬",
     layout="wide"
 )
-
-# First, check if we can import required libraries
-try:
-    from sklearn.feature_extraction.text import TfidfVectorizer
-    from sklearn.metrics.pairwise import cosine_similarity
-    from surprise import Dataset, Reader, SVD
-    from surprise.model_selection import train_test_split
-except ImportError as e:
-    st.error("❌ Error loading required libraries")
-    st.error(f"Details: {str(e)}")
-    st.info("Please check if all required packages are installed correctly")
-    st.stop()
 
 # Add custom CSS
 st.markdown("""
