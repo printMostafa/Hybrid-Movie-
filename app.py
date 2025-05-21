@@ -1,52 +1,18 @@
 import streamlit as st
-import os
-import sys
+import pandas as pd
+import numpy as np
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+from surprise import Dataset, Reader, SVD
+from surprise.model_selection import train_test_split
 
-# Display Python version and environment info
-st.sidebar.text(f"Python Version: {sys.version}")
-st.sidebar.text(f"Working Directory: {os.getcwd()}")
+# Page config
+st.set_page_config(page_title="Movie Recommender", page_icon="🎬")
 
-# Basic imports first
-try:
-    import numpy as np
-    import pandas as pd
-except ImportError as e:
-    st.error("❌ Error loading basic dependencies (numpy/pandas)")
-    st.error(f"Error details: {str(e)}")
-    st.stop()
-
-# Machine learning imports
-try:
-    from sklearn.feature_extraction.text import TfidfVectorizer
-    from sklearn.metrics.pairwise import cosine_similarity
-except ImportError as e:
-    st.error("❌ Error loading scikit-learn")
-    st.error(f"Error details: {str(e)}")
-    st.stop()
-
-# Surprise library imports
-try:
-    from surprise import Dataset, Reader, SVD
-    from surprise.model_selection import train_test_split
-except ImportError as e:
-    st.error("❌ Error loading surprise library")
-    st.error(f"Error details: {str(e)}")
-    st.stop()
-
-# Page configuration
-st.set_page_config(
-    page_title="Hybrid Movie Recommender",
-    page_icon="🎬",
-    layout="wide"
-)
-
-# Add custom CSS
+# Add CSS
 st.markdown("""
     <style>
-    .stApp {
-        max-width: 1200px;
-        margin: 0 auto;
-    }
+    .stApp { max-width: 1200px; margin: 0 auto; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -57,130 +23,108 @@ def load_data():
         movies = pd.read_csv('movies.csv')
         return ratings, movies
     except Exception as e:
-        st.error(f"❌ Error loading data files: {str(e)}")
+        st.error(f"Error loading data: {str(e)}")
         return None, None
 
-def process_data(ratings, movies):
-    try:
-        ratings_with_movies = ratings.merge(movies, on='movieId', how='left')
-        ratings_with_movies['genres'] = ratings_with_movies['genres'].fillna('Unknown')
-        ratings_with_movies['genres'] = ratings_with_movies['genres'].apply(lambda x: x.replace('|', ' '))
-        return ratings_with_movies.drop_duplicates(subset='movieId')[['movieId', 'title', 'genres']]
-    except Exception as e:
-        st.error(f"❌ Error processing data: {str(e)}")
-        return None
-
-def create_recommendation_model(movies_cleaned):
-    try:
-        tfidf = TfidfVectorizer(stop_words='english')
-        tfidf_matrix = tfidf.fit_transform(movies_cleaned['genres'])
-        return cosine_similarity(tfidf_matrix, tfidf_matrix)
-    except Exception as e:
-        st.error(f"❌ Error creating recommendation model: {str(e)}")
-        return None
-
-def train_svd_model(ratings):
-    try:
-        reader = Reader(rating_scale=(0.5, 5.0))
-        data = Dataset.load_from_df(ratings[['userId', 'movieId', 'rating']], reader)
-        trainset, _ = train_test_split(data, test_size=0.2, random_state=42)
-        model = SVD()
-        model.fit(trainset)
-        return model
-    except Exception as e:
-        st.error(f"❌ Error training SVD model: {str(e)}")
-        return None
-
-def hybrid_recommendation(user_id, movie_title, model, movies_cleaned, cosine_sim, indices, weight_cb=0.4, weight_cf=0.6, top_n=10):
-    try:
-        if movie_title not in indices:
-            return pd.DataFrame([{"title": "Movie not found"}])
-        
-        idx = indices[movie_title]
-        sim_scores = list(enumerate(cosine_sim[idx]))
-        sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
-        movie_indices = [i[0] for i in sim_scores[1:top_n+30]]
-        
-        cb_movies = movies_cleaned.iloc[movie_indices][['movieId', 'title']].copy()
-        cb_movies['cb_score'] = [score for _, score in sim_scores[1:top_n+30]]
-        
-        cf_scores = []
-        for _, row in cb_movies.iterrows():
-            pred = model.predict(user_id, row['movieId'])
-            cf_scores.append(pred.est)
-            
-        cb_movies['cf_score'] = cf_scores
-        cb_movies['hybrid_score'] = (cb_movies['cb_score'] * weight_cb) + (cb_movies['cf_score'] * weight_cf)
-        return cb_movies.sort_values('hybrid_score', ascending=False)[['title', 'cb_score', 'cf_score', 'hybrid_score']].head(top_n)
+def create_movie_features(movies_data):
+    # Process genres
+    movies_data['genres'] = movies_data['genres'].fillna('Unknown')
+    movies_data['genres'] = movies_data['genres'].apply(lambda x: x.replace('|', ' '))
     
-    except Exception as e:
-        st.error(f"❌ Error generating recommendations: {str(e)}")
-        return pd.DataFrame()
+    # Create TF-IDF matrix
+    tfidf = TfidfVectorizer(stop_words='english')
+    tfidf_matrix = tfidf.fit_transform(movies_data['genres'])
+    return cosine_similarity(tfidf_matrix, tfidf_matrix)
 
-# Main app
+def train_model(ratings_data):
+    reader = Reader(rating_scale=(0.5, 5.0))
+    data = Dataset.load_from_df(ratings_data[['userId', 'movieId', 'rating']], reader)
+    trainset, _ = train_test_split(data, test_size=0.2, random_state=42)
+    model = SVD()
+    model.fit(trainset)
+    return model
+
+def get_recommendations(user_id, movie_title, model, movies_df, similarity_matrix, indices):
+    # Get movie index
+    idx = indices[movie_title]
+    
+    # Get similarity scores
+    sim_scores = list(enumerate(similarity_matrix[idx]))
+    sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
+    sim_scores = sim_scores[1:11]  # Get top 10
+    
+    # Get movie indices
+    movie_indices = [i[0] for i in sim_scores]
+    
+    # Get recommendations
+    recommendations = movies_df.iloc[movie_indices][['title', 'genres']]
+    recommendations['similarity_score'] = [score for _, score in sim_scores]
+    
+    # Add predicted ratings
+    recommendations['predicted_rating'] = recommendations.index.map(
+        lambda x: model.predict(user_id, movies_df.iloc[x]['movieId']).est
+    )
+    
+    # Calculate hybrid score
+    recommendations['hybrid_score'] = (
+        0.4 * recommendations['similarity_score'] + 
+        0.6 * recommendations['predicted_rating']
+    )
+    
+    return recommendations.sort_values('hybrid_score', ascending=False)
+
 def main():
-    st.title("🎬 Hybrid Movie Recommendation System")
+    st.title("🎬 Movie Recommendation System")
     
     # Load data
     with st.spinner("Loading data..."):
         ratings, movies = load_data()
+        
         if ratings is None or movies is None:
-            st.error("Failed to load necessary data files")
+            st.error("Failed to load data files")
             st.stop()
     
-    # Process data
-    with st.spinner("Processing data..."):
-        movies_cleaned = process_data(ratings, movies)
-        if movies_cleaned is None:
-            st.error("Failed to process data")
-            st.stop()
+    # Process movies
+    movies_cleaned = movies.copy()
+    similarity_matrix = create_movie_features(movies_cleaned)
+    indices = pd.Series(movies_cleaned.index, index=movies_cleaned['title'])
     
-    # Create models
-    with st.spinner("Creating recommendation models..."):
-        cosine_sim = create_recommendation_model(movies_cleaned)
-        if cosine_sim is None:
-            st.error("Failed to create recommendation model")
-            st.stop()
-            
-        model = train_svd_model(ratings)
-        if model is None:
-            st.error("Failed to train SVD model")
-            st.stop()
-    
-    indices = pd.Series(movies_cleaned.index, index=movies_cleaned['title']).drop_duplicates()
+    # Train model
+    model = train_model(ratings)
     
     # User interface
-    with st.container():
-        col1, col2 = st.columns(2)
-        with col1:
-            user_id = st.number_input("Enter User ID:", min_value=1, max_value=int(ratings['userId'].max()), value=1)
-        with col2:
-            movie_title = st.selectbox("Select a movie you like:", sorted(movies['title'].unique()))
+    col1, col2 = st.columns(2)
     
-    if st.button("Show Recommendations", type="primary"):
-        with st.spinner("Generating recommendations..."):
-            recommendations = hybrid_recommendation(
-                user_id, movie_title, model, movies_cleaned, cosine_sim, indices
+    with col1:
+        user_id = st.number_input(
+            "User ID",
+            min_value=1,
+            max_value=int(ratings['userId'].max()),
+            value=1
+        )
+    
+    with col2:
+        movie_title = st.selectbox(
+            "Select a movie",
+            options=movies_cleaned['title'].sort_values()
+        )
+    
+    if st.button("Get Recommendations", type="primary"):
+        with st.spinner("Finding movies for you..."):
+            recommendations = get_recommendations(
+                user_id,
+                movie_title,
+                model,
+                movies_cleaned,
+                similarity_matrix,
+                indices
             )
             
-            if not recommendations.empty:
-                st.success("📽️ Here are your personalized movie recommendations:")
-                
-                # Format the scores
-                recommendations['cb_score'] = recommendations['cb_score'].round(3)
-                recommendations['cf_score'] = recommendations['cf_score'].round(3)
-                recommendations['hybrid_score'] = recommendations['hybrid_score'].round(3)
-                
-                st.dataframe(
-                    recommendations,
-                    column_config={
-                        "title": "Movie Title",
-                        "cb_score": "Content Score",
-                        "cf_score": "Collaborative Score",
-                        "hybrid_score": "Hybrid Score"
-                    },
-                    hide_index=True
-                )
+            st.success("Here are your recommendations:")
+            st.dataframe(
+                recommendations[['title', 'genres', 'hybrid_score']].round(3),
+                hide_index=True
+            )
 
 if __name__ == "__main__":
     main()
